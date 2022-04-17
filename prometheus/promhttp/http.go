@@ -210,6 +210,22 @@ func HandlerForTransactional(reg prometheus.TransactionalGatherer, opts HandlerO
 				return
 			}
 		}
+
+		// If a Process channel has been provided, it means that the process
+		// being instrumented has a completion i.e, a short-living process.
+		// The completion of the process is signified by any message received
+		// throught this Process channel.
+		if opts.Process != nil {
+			select {
+			case <-opts.Process:
+				// As the process is now complete, we can call the provided DoneFn() in a goroutine,
+				// which can be any clean-up/shutdown operation that needs to be performed.
+				// In case DoneFn() shuts down the HTTP server, the handler would write a response
+				// before shutting down.
+				go opts.DoneFn()
+			default:
+			}
+		}
 	})
 
 	if opts.Timeout <= 0 {
@@ -362,6 +378,18 @@ type HandlerOpts struct {
 	// (which changes the identity of the resulting series on the Prometheus
 	// server).
 	EnableOpenMetrics bool
+	// If a Process channel has been provided, it means that the process
+	// being instrumented has a completion i.e, it is a short-living process.
+	// The completion of the process is signified by any message received
+	// throught this Process channel.
+	// As we only need to receive messages from the channel, it is receive-only.
+	Process <-chan struct{}
+	// DoneFn is a function, which is called when the handler receives a request
+	// and there is a message received from the Process channel. It is suitable
+	// for any clean-up or shutdown type of operation and can be essentially used
+	// to coordinate the shutdown of a process with Prometheus scrapes, so that
+	// metrics can be gathered.
+	DoneFn func()
 }
 
 // gzipAccepted returns whether the client will accept gzip-encoded content.
